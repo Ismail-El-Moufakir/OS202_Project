@@ -1,0 +1,138 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+\geometry{margin=1in}
+\usepackage{graphicx}
+\usepackage{float}
+
+% Configuration for code listings
+\lstset{
+    language=C++,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue}\bfseries,
+    stringstyle=\color{red},
+    commentstyle=\color{green!50!black},
+    numbers=left,
+    numberstyle=\tiny,
+    stepnumber=1,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    frame=single,
+    breaklines=true,
+    breakatwhitespace=true,
+    tabsize=4
+}
+
+\title{Étape 2 : comparaison approche séquentielle avec le parallélisation MPI}
+\author{}
+\date{Mars 2025}
+
+\begin{document}
+
+\section{Approche de parallélisation avec MPI}
+
+Afin d'améliorer les performances de la simulation, nous avons adopté une \textbf{approche de parallélisation par séparation fonctionnelle} en utilisant la bibliothèque MPI. Cette approche consiste à séparer les tâches de \textbf{calcul de la simulation} et \textbf{d'affichage graphique (SDL)} sur deux processus différents :
+
+\begin{itemize}
+    \item Le \textbf{processus 0} est dédié exclusivement à l'affichage en temps réel de la simulation (carte de la végétation et du feu).
+    \item Le \textbf{processus 1} exécute la simulation (calcul des nouvelles cartes à chaque pas de temps) et envoie périodiquement les données au processus 0 pour l'affichage.
+\end{itemize}
+
+\subsection{Schéma de fonctionnement}
+
+\begin{center}
+\begin{tabular}{|c|c|}
+\hline
+\textbf{Processus 0 (Affichage)} & \textbf{Processus 1 (Simulation)} \\
+\hline
+Réception des cartes & Calcul de la simulation \\
+Mise à jour de l'affichage SDL & Envoi des cartes mises à jour \\
+Gestion des événements SDL & Vérification des signaux de fin \\
+\hline
+\end{tabular}
+\end{center}
+
+\subsection{Découpage du code (extrait)}
+
+L'extrait suivant illustre la séparation des rôles entre les processus MPI et les communications associées :
+
+\begin{lstlisting}[language=C++, caption={Séparation des processus MPI pour la simulation et l'affichage}, label={lst:mpi_separation}]
+MPI_Init(&argc, &argv);
+int rank;
+MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+if (rank == 0) {
+    // Processus d'affichage
+    while (running) {
+        MPI_Recv(global_vegetal.data(), grid_size, MPI_UNSIGNED_CHAR, 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(global_fire.data(), grid_size, MPI_UNSIGNED_CHAR, 1, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        displayer->update(global_vegetal, global_fire); // Mise à jour SDL
+    }
+    // Signal de fin au simulateur
+    MPI_Send(&termination_signal, 1, MPI_INT, 1, 2, MPI_COMM_WORLD);
+} else if (rank == 1) {
+    // Processus de simulation
+    while (simulation_continue) {
+        simulation_continue = simu.update(); // Calcul simulation
+        MPI_Send(local_veg.data(), grid_size, MPI_UNSIGNED_CHAR, 0, 0, MPI_COMM_WORLD); // Envoi cartes
+        MPI_Send(local_fire.data(), grid_size, MPI_UNSIGNED_CHAR, 0, 1, MPI_COMM_WORLD);
+    }
+}
+MPI_Finalize();
+\end{lstlisting}
+
+\subsection{Remarques sur la communication MPI}
+
+\begin{itemize}
+    \item Nous utilisons \texttt{MPI\_Send} et \texttt{MPI\_Recv} pour transmettre les cartes (végétation et feu) sous forme de tableaux de \texttt{uint8\_t}.
+    \item La communication est effectuée à chaque itération de simulation pour permettre un affichage fluide et en temps réel.
+    \item Un signal de terminaison est envoyé via \texttt{MPI\_Send} pour arrêter proprement la simulation.
+    \item L'usage de \texttt{MPI\_Iprobe} permet de détecter les messages sans bloquer l'exécution (affichage ou calcul).
+\end{itemize}
+
+
+
+\section{Comparaison des performances : version séquentielle vs version parallèle (MPI)}
+
+\subsection{Résumé des résultats}
+
+Les mesures de performance réalisées sur la version séquentielle et sur la version parallèle (utilisant MPI avec 2 processus) sont résumées dans le tableau~\ref{tab:comparaison_performances}.
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|l|c|c|}
+        \hline
+        \textbf{Critère} & \textbf{Séquentiel} & \textbf{Parallèle (MPI, 2 processus)} \\
+        \hline
+        Nombre total de pas (steps) & 1126 & 1024 \\
+        \hline
+        Temps total (approximation) & 177385 ms (177.385 s) & $\sim$22211 ms (22.211 s) \\
+        \hline
+        Temps moyen par pas (simulation) & 157.536 ms & 21.7158 ms \\
+        \hline
+        Temps moyen d'affichage & 56.9254 ms & 24.4688 ms \\
+        \hline
+    \end{tabular}
+    \caption{Comparaison des performances entre la version séquentielle et la version parallèle (MPI).}
+    \label{tab:comparaison_performances}
+\end{table}
+
+\subsection{Analyse et interprétation}
+
+On observe une amélioration significative des performances grâce à la parallélisation avec MPI :
+\begin{itemize}
+    \item Le \textbf{temps moyen de simulation par pas} est réduit d'un facteur $\approx 7$, passant de 157.5 ms à 21.7 ms.
+    \item Le \textbf{temps total de simulation} est passé d'environ 177 secondes à 22 secondes, soit une accélération globale d'environ $\times 8$.
+    \item Le \textbf{temps moyen d'affichage} est également réduit, mais dans une moindre mesure (environ $\times 2.3$), car l'affichage reste géré uniquement par le processus 0.
+\end{itemize}
+
+En conclusion, la version parallèle permet une nette réduction du temps de calcul, démontrant l'efficacité de la parallélisation avec MPI pour cette simulation, notamment sur les tâches de calcul intensif. Cependant, l'affichage reste un facteur limitant partiellement optimisé.
+
+
+\end{document}
