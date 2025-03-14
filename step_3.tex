@@ -1,0 +1,144 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+\geometry{margin=1in}
+\usepackage{graphicx}
+\usepackage{float}
+
+% Configuration for code listings
+\lstset{
+    language=C++,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue}\bfseries,
+    stringstyle=\color{red},
+    commentstyle=\color{green!50!black},
+    numbers=left,
+    numberstyle=\tiny,
+    stepnumber=1,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    frame=single,
+    breaklines=true,
+    breakatwhitespace=true,
+    tabsize=4
+}
+
+\title{Étape 3 : Parallélisation hybride MPI + OpenMP}
+
+\date{Mars 2025}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+Cette étape combine la parallélisation MPI de l'étape 2 avec la parallélisation OpenMP de l'étape 1 pour créer une approche hybride. L'objectif est d'exploiter à la fois la parallélisation entre processus (MPI) et la parallélisation au sein de chaque processus (OpenMP).
+
+\section{Implémentation}
+
+\subsection{Architecture hybride}
+L'architecture hybride mise en place repose sur :
+\begin{itemize}
+    \item Une séparation fonctionnelle avec MPI (2 processus) :
+    \begin{itemize}
+        \item Processus 0 : Gestion de l'affichage SDL
+        \item Processus 1 : Calcul de la simulation avec parallélisation OpenMP
+    \end{itemize}
+    \item Une parallélisation OpenMP dans le processus de calcul pour accélérer la mise à jour de la simulation
+\end{itemize}
+
+\subsection{Code principal}
+Voici les parties essentielles du code hybride :
+
+\begin{lstlisting}[caption={Processus de calcul avec OpenMP}, label={lst:hybrid}]
+// Dans le processus de calcul (rank == 1)
+#pragma omp parallel
+{
+    #pragma omp single
+    {
+        simulation_continue = simu.update();
+    }
+}
+
+// Envoi des données vers le processus d'affichage
+if (simulation_continue) {
+    auto veg_map = simu.vegetal_map();
+    auto fire_map = simu.fire_map();
+    MPI_Send(veg_map.data(), grid_size, MPI_UINT8_T, 0, 1, MPI_COMM_WORLD);
+    MPI_Send(fire_map.data(), grid_size, MPI_UINT8_T, 0, 2, MPI_COMM_WORLD);
+}
+\end{lstlisting}
+
+\section{Résultats et Analyse}
+
+\subsection{Mesures de performance}
+
+Les tests ont été effectués avec les paramètres suivants :
+\begin{itemize}
+    \item Taille du terrain : 1.0
+    \item Discrétisation : 200 × 200
+    \item Position initiale du feu : (0.2, 0.5)
+    \item Vent : (1.0, 0.0)
+\end{itemize}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|l|c|c|c|}
+        \hline
+        \textbf{Version} & \textbf{Temps total} & \textbf{Temps moyen/pas} & \textbf{Accélération} \\
+        \hline
+        Séquentielle & 177.385s & 157.536ms & 1.0× \\
+        \hline
+        MPI (2 proc.) & 22.211s & 21.716ms & 8.0× \\
+        \hline
+        Hybride (2 proc., 4 threads) & 43.617s & 42.593ms & 4.1× \\
+        \hline
+    \end{tabular}
+    \caption{Comparaison des performances entre les différentes versions}
+    \label{tab:perf_comparison}
+\end{table}
+
+\subsection{Analyse des résultats}
+
+Les résultats montrent plusieurs points intéressants :
+
+\begin{enumerate}
+    \item \textbf{Performance globale} : La version hybride montre une accélération significative par rapport à la version séquentielle (4.1×), mais est moins performante que la version MPI pure.
+    
+    \item \textbf{Overhead de parallélisation} : La combinaison MPI+OpenMP introduit un overhead supplémentaire qui explique la baisse de performance par rapport à la version MPI pure :
+    \begin{itemize}
+        \item Coût de création et gestion des threads OpenMP
+        \item Synchronisation entre threads
+        \item Potentielles contentions mémoire
+    \end{itemize}
+    
+    \item \textbf{Limitations} : Plusieurs facteurs limitent l'efficacité de la parallélisation hybride :
+    \begin{itemize}
+        \item La nature séquentielle de certaines parties du code
+        \item La granularité des tâches parallélisées
+        \item Les communications MPI qui peuvent créer des goulots d'étranglement
+    \end{itemize}
+\end{enumerate}
+
+\section{Conclusion}
+
+La parallélisation hybride MPI+OpenMP n'a pas apporté les gains de performance espérés dans ce cas précis. Cela s'explique principalement par :
+\begin{itemize}
+    \item La nature du problème qui se prête mieux à une parallélisation pure MPI
+    \item L'overhead introduit par la gestion des threads OpenMP
+    \item La complexité accrue de la synchronisation dans un modèle hybride
+\end{itemize}
+
+Pour améliorer les performances, on pourrait envisager :
+\begin{itemize}
+    \item Une meilleure granularité des tâches OpenMP
+    \item Une optimisation des communications MPI
+    \item Une répartition plus équilibrée de la charge entre les threads
+\end{itemize}
+
+\end{document} 

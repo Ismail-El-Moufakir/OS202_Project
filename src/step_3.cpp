@@ -1,4 +1,5 @@
 #include <mpi.h>
+#include <omp.h>
 #include <iostream>
 #include <cstdlib>
 #include <chrono>
@@ -20,10 +21,29 @@ struct ParamsType
     Model::LexicoIndices start{10u, 10u};
 };
 
-void analyze_arg(int nargs, char *args[], ParamsType &params)
-{
-    // Implémentez ici votre parsing si besoin.
-    // Pour cet exemple, on garde les valeurs par défaut.
+void analyze_arg(int nargs, char* args[], ParamsType& params) {
+    for (int i = 0; i < nargs; ++i) {
+        std::string arg = args[i];
+        
+        if (arg == "--length" && i + 1 < nargs) {
+            params.length = std::stod(args[++i]);
+        }
+        else if (arg == "--discretization" && i + 1 < nargs) {
+            params.discretization = std::stoul(args[++i]);
+        }
+        else if (arg == "--wind-x" && i + 1 < nargs) {
+            params.wind[0] = std::stod(args[++i]);
+        }
+        else if (arg == "--wind-y" && i + 1 < nargs) {
+            params.wind[1] = std::stod(args[++i]);
+        }
+        else if (arg == "--start-x" && i + 1 < nargs) {
+            params.start.column = std::stoul(args[++i]);
+        }
+        else if (arg == "--start-y" && i + 1 < nargs) {
+            params.start.row = std::stoul(args[++i]);
+        }
+    }
 }
 
 ParamsType parse_arguments(int nargs, char *args[])
@@ -56,7 +76,15 @@ bool check_params(ParamsType &params)
 
 int main(int argc, char *argv[])
 {
-    MPI_Init(&argc, &argv);
+    int provided;
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
+    if (provided < MPI_THREAD_MULTIPLE)
+    {
+        std::cerr << "Le niveau de support des threads MPI n'est pas suffisant!" << std::endl;
+        MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
+        return EXIT_FAILURE;
+    }
+
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
@@ -71,6 +99,14 @@ int main(int argc, char *argv[])
     }
 
     auto params = parse_arguments(argc - 1, &argv[1]);
+    if (rank == 0) {
+        std::cout << "Paramètres de la simulation :" << std::endl;
+        std::cout << "  - Taille : " << params.length << std::endl;
+        std::cout << "  - Discrétisation : " << params.discretization << std::endl;
+        std::cout << "  - Vent : [" << params.wind[0] << ", " << params.wind[1] << "]" << std::endl;
+        std::cout << "  - Position initiale : (" << params.start.column << ", " << params.start.row << ")" << std::endl;
+    }
+
     if (!check_params(params))
     {
         MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
@@ -78,11 +114,12 @@ int main(int argc, char *argv[])
     }
 
     int grid_size = params.discretization * params.discretization;
+    const int SCALE = 5;  // Facteur d'échelle pour la fenêtre
 
     if (rank == 0)
     {
         // Processus d'affichage (SDL)
-        std::shared_ptr<Displayer> displayer = Displayer::init_instance(params.discretization, params.discretization);
+        std::shared_ptr<Displayer> displayer = Displayer::init_instance(params.discretization * SCALE, params.discretization * SCALE);
         std::vector<std::uint8_t> global_vegetal(grid_size);
         std::vector<std::uint8_t> global_fire(grid_size);
         bool running = true;
@@ -151,9 +188,7 @@ int main(int argc, char *argv[])
     }
     else if (rank == 1)
     {
-        // Processus de calcul (simulation)
-        omp_set_num_threads(num_threads);
-
+        // Processus de calcul (simulation) avec OpenMP
         Model simu(params.length, params.discretization, params.wind, params.start);
         bool simulation_continue = true;
         unsigned step_count = 0;
@@ -162,7 +197,16 @@ int main(int argc, char *argv[])
         while (simulation_continue)
         {
             auto step_start = std::chrono::high_resolution_clock::now();
-            simulation_continue = simu.update();
+            
+            // Parallélisation OpenMP de l'update
+            #pragma omp parallel
+            {
+                #pragma omp single
+                {
+                    simulation_continue = simu.update();
+                }
+            }
+            
             auto step_end = std::chrono::high_resolution_clock::now();
             total_sim_time += (step_end - step_start);
             step_count++;
@@ -174,7 +218,8 @@ int main(int argc, char *argv[])
                                     static_cast<double>(step_count);
                 std::cout << "[SIMULATION] Time step " << simu.time_step()
                           << " - Temps moyen de simulation : " << avg_sim_ms
-                          << " ms sur " << step_count << " itérations." << std::endl;
+                          << " ms sur " << step_count << " itérations."
+                          << " - Nombre de threads OpenMP : " << omp_get_max_threads() << std::endl;
             }
 
             // Envoi des données de simulation vers le processus d'affichage

@@ -1,31 +1,26 @@
-#pragma once
+#ifndef _DISPLAY_HPP_
+#define _DISPLAY_HPP_
+
+#include <SDL2/SDL.h>
+#include <memory>
 #include <vector>
 #include <cstdint>
-#include <memory>
-#if defined(__linux__) || defined(__APPLE__)
-#  include "SDL.h"
-#endif
 
 class Displayer
 {
 public:
-    Displayer( std::uint32_t width, std::uint32_t height );
-    Displayer( Displayer const & ) = delete;
-    Displayer( Displayer      && ) = delete;
+    static std::shared_ptr<Displayer> createOrGetInstance(int width, int height);
     ~Displayer();
-
-    Displayer& operator = ( Displayer const & ) = delete;
-    Displayer& operator = ( Displayer      && ) = delete;
-
-    void update( std::vector<std::uint8_t> const & vegetation_global_map,
-                 std::vector<std::uint8_t> const & fire_global_map );
-
-    static std::shared_ptr<Displayer> init_instance( std::uint32_t t_width, std::uint32_t t_height );
-    static std::shared_ptr<Displayer> instance();
+    void update(const std::vector<std::uint8_t>& vegetation_global_map, const std::vector<std::uint8_t>& fire_global_map);
 
 private:
+    Displayer(int width, int height);
     static std::shared_ptr<Displayer> unique_instance;
-
-    SDL_Renderer *m_pt_renderer{nullptr};
-    SDL_Window   *m_pt_window {nullptr};
+    
+    int m_width;
+    int m_height;
+    SDL_Window* m_window;
+    SDL_Renderer* m_pt_renderer;
 };
+
+#endif

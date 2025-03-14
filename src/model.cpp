@@ -81,86 +81,54 @@ Model::update()
         // Récupération de la coordonnée lexicographique de la case en feu :
         LexicoIndices coord = get_lexicographic_from_index(f.first);
         // Et de la puissance du foyer
-        double        power = log_factor(f.second);
-
+        double power = log_factor(f.second);
 
         // On va tester les cases voisines pour contamination par le feu :
-        if (coord.row < m_geometry-1)
-        {
-            double tirage      = pseudo_random( f.first+m_time_step, m_time_step);
-            double green_power = m_vegetation_map[f.first+m_geometry];
-            double correction  = power*log_factor(green_power);
-            if (tirage < alphaSouthNorth*p1*correction)
-            {
-                m_fire_map[f.first + m_geometry]   = 255.;
-                next_front[f.first + m_geometry] = 255.;
+        // Test des quatre directions (Nord, Sud, Est, Ouest)
+        std::array<std::pair<int, double>, 4> directions = {
+            std::make_pair(m_geometry, alphaSouthNorth),    // Sud
+            std::make_pair(-m_geometry, alphaNorthSouth),   // Nord
+            std::make_pair(1, alphaEastWest),              // Est
+            std::make_pair(-1, alphaWestEast)              // Ouest
+        };
+
+        for (const auto& [offset, alpha] : directions) {
+            // Vérifier si la case voisine est dans la grille
+            bool is_valid = true;
+            if (offset == m_geometry && coord.row >= m_geometry-1) is_valid = false;      // Sud
+            if (offset == -m_geometry && coord.row <= 0) is_valid = false;                // Nord
+            if (offset == 1 && coord.column >= m_geometry-1) is_valid = false;            // Est
+            if (offset == -1 && coord.column <= 0) is_valid = false;                      // Ouest
+
+            if (is_valid) {
+                int neighbor_index = f.first + offset;
+                if (neighbor_index >= 0 && neighbor_index < m_geometry * m_geometry) {
+                    double tirage = pseudo_random(f.first * (offset + 13427) + m_time_step, m_time_step);
+                    double green_power = m_vegetation_map[neighbor_index];
+                    double correction = power * log_factor(green_power);
+                    
+                    if (tirage < alpha * p1 * correction) {
+                        m_fire_map[neighbor_index] = 255.;
+                        next_front[neighbor_index] = 255.;
+                    }
+                }
             }
         }
 
-        if (coord.row > 0)
-        {
-            double tirage      = pseudo_random( f.first*13427+m_time_step, m_time_step);
-            double green_power = m_vegetation_map[f.first - m_geometry];
-            double correction  = power*log_factor(green_power);
-            if (tirage < alphaNorthSouth*p1*correction)
-            {
-                m_fire_map[f.first - m_geometry] = 255.;
-                next_front[f.first - m_geometry] = 255.;
-            }
-        }
-
-        if (coord.column < m_geometry-1)
-        {
-            double tirage      = pseudo_random( f.first*13427*13427+m_time_step, m_time_step);
-            double green_power = m_vegetation_map[f.first+1];
-            double correction  = power*log_factor(green_power);
-            if (tirage < alphaEastWest*p1*correction)
-            {
-                m_fire_map[f.first + 1] = 255.;
-                next_front[f.first + 1] = 255.;
-            }
-        }
-
-        if (coord.column > 0)
-        {
-            double tirage      = pseudo_random( f.first*13427*13427*13427+m_time_step, m_time_step);
-            double green_power = m_vegetation_map[f.first - 1];
-            double correction  = power*log_factor(green_power);
-            if (tirage < alphaWestEast*p1*correction)
-            {
-                m_fire_map[f.first - 1] = 255.;
-                next_front[f.first - 1] = 255.;
-            }
-        }
-        // Si le feu est à son max,
-        if (f.second == 255)
-        {   // On regarde si il commence à faiblir pour s'éteindre au bout d'un moment :
-            double tirage = pseudo_random( f.first * 52513 + m_time_step, m_time_step);
-            if (tirage < p2)
-            {
-                m_fire_map[f.first] >>= 1;
-                next_front[f.first] >>= 1;
-            }
-        }
-        else
-        {
-            // Foyer en train de s'éteindre.
-            m_fire_map[f.first] >>= 1;
-            next_front[f.first] >>= 1;
-            if (next_front[f.first] == 0)
-            {
-                next_front.erase(f.first);
-            }
-        }
-
-    }    
-    // A chaque itération, la végétation à l'endroit d'un foyer diminue
-    m_fire_front = next_front;
-    for (auto f : m_fire_front)
-    {
-        if (m_vegetation_map[f.first] > 0)
+        // Mise à jour de la végétation et test d'extinction
+        if (m_vegetation_map[f.first] > 0) {
             m_vegetation_map[f.first] -= 1;
+            double tirage = pseudo_random(f.first * 7919 + m_time_step, m_time_step);
+            if (tirage < p2) {
+                next_front[f.first] = next_front[f.first]/2;
+                if (next_front[f.first] <= 1) next_front.erase(f.first);
+            }
+        } else {
+            next_front.erase(f.first);
+        }
     }
+
+    m_fire_front.swap(next_front);
     m_time_step += 1;
     return !m_fire_front.empty();
 }

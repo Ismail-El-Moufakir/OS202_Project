@@ -2,104 +2,97 @@
 #include <stdexcept>
 #include <string> 
 #include "display.hpp"
+#include <iostream>
+#include <cmath>
 
 using namespace std::string_literals;
 
 std::shared_ptr<Displayer> Displayer::unique_instance{nullptr};
 
-Displayer::Displayer( std::uint32_t t_width, std::uint32_t t_height )
+std::shared_ptr<Displayer> Displayer::createOrGetInstance(int width, int height)
 {
-    // Initialisation du contexte pour SDL :
-    if ( SDL_Init( SDL_INIT_VIDEO ) < 0 )
-    {
-        std::string err_msg = "Erreur lors de l'initialisation de SDL : "s + std::string(SDL_GetError());
-        throw std::runtime_error(err_msg);
+    if (unique_instance == nullptr)
+        unique_instance = std::shared_ptr<Displayer>(new Displayer(width, height));
+    return unique_instance;
+}
+
+Displayer::Displayer(int width, int height)
+    : m_width(width), m_height(height)
+{
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        std::cout << "SDL initialization failed: " << SDL_GetError() << std::endl;
+        return;
     }
 
-    // On multiplie la taille par un facteur pour avoir une fenêtre plus grande
-    const int scale = 20;
-    const int window_width = t_width * scale;
-    const int window_height = t_height * scale;
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
+    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");  // Pas d'interpolation pour un rendu pixel perfect
 
-    // Création de la fenêtre avec support Metal sur macOS
-    m_pt_window = SDL_CreateWindow("Simulation Feu de Forêt",
-                                SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                window_width, window_height,
-                                SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
-    
-    if (m_pt_window == nullptr)
-    {
-        std::string err_msg = "Erreur lors de la création de la fenêtre : "s + std::string(SDL_GetError());
-        throw std::runtime_error(err_msg);
+    m_window = SDL_CreateWindow("Fire Simulation",
+                              SDL_WINDOWPOS_CENTERED,
+                              SDL_WINDOWPOS_CENTERED,
+                              width, height,
+                              SDL_WINDOW_SHOWN);
+    if (!m_window) {
+        std::cout << "Window creation failed: " << SDL_GetError() << std::endl;
+        return;
     }
 
-    // Création du renderer avec accélération matérielle
-    m_pt_renderer = SDL_CreateRenderer(m_pt_window, -1, 
-                                    SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-    
-    if (m_pt_renderer == nullptr)
-    {
-        std::string err_msg = "Erreur lors de la création du moteur de rendu : "s + std::string(SDL_GetError());
-        throw std::runtime_error(err_msg);
+    m_pt_renderer = SDL_CreateRenderer(m_window, -1, SDL_RENDERER_ACCELERATED);
+    if (!m_pt_renderer) {
+        std::cout << "Renderer creation failed: " << SDL_GetError() << std::endl;
+        return;
     }
-
-    // Configure le renderer pour utiliser la taille logique de la fenêtre
-    SDL_RenderSetLogicalSize(m_pt_renderer, window_width, window_height);
 }
 
 Displayer::~Displayer()
 {
     if (m_pt_renderer) SDL_DestroyRenderer(m_pt_renderer);
-    if (m_pt_window) SDL_DestroyWindow(m_pt_window);
+    if (m_window) SDL_DestroyWindow(m_window);
     SDL_Quit();
 }
 
-void
-Displayer::update( std::vector<std::uint8_t> const & vegetation_global_map,
-                   std::vector<std::uint8_t> const & fire_global_map )
+void Displayer::update(const std::vector<std::uint8_t>& vegetation_global_map, const std::vector<std::uint8_t>& fire_global_map)
 {
-    const int scale = 20;
-    const int grid_w = vegetation_global_map.size() / scale;
-    const int grid_h = grid_w;  // Puisque c'est un carré
-    
-    // Efface l'écran avec du noir
+    int grid_size = static_cast<int>(std::sqrt(vegetation_global_map.size()));
+    double cell_w = static_cast<double>(m_width) / grid_size;
+    double cell_h = static_cast<double>(m_height) / grid_size;
+
     SDL_SetRenderDrawColor(m_pt_renderer, 0, 0, 0, 255);
     SDL_RenderClear(m_pt_renderer);
 
-    // Dessine chaque cellule comme un rectangle
-    SDL_Rect rect;
-    rect.w = scale;
-    rect.h = scale;
+    for (int i = 0; i < grid_size; ++i) {
+        for (int j = 0; j < grid_size; ++j) {
+            int index = i * grid_size + j;
+            SDL_Rect rect = {
+                static_cast<int>(j * cell_w),
+                static_cast<int>(i * cell_h),
+                static_cast<int>(std::ceil(cell_w)),  // Arrondi au pixel supérieur
+                static_cast<int>(std::ceil(cell_h))   // pour éviter les trous
+            };
 
-    for (int i = 0; i < grid_h; ++i)
-    {
-        for (int j = 0; j < grid_w; ++j)
-        {
-            SDL_SetRenderDrawColor(m_pt_renderer, 
-                                fire_global_map[j + grid_w*i],
-                                vegetation_global_map[j + grid_w*i], 
-                                0, 255);
-            rect.x = j * scale;
-            rect.y = (grid_h-i-1) * scale;
+            uint8_t fire = fire_global_map[index];
+            uint8_t veg = vegetation_global_map[index];
+
+            if (fire > 0) {
+                // Gradient de couleur pour le feu : rouge -> orange -> jaune
+                if (fire > 127) {
+                    // Rouge vif pour le feu intense
+                    SDL_SetRenderDrawColor(m_pt_renderer, 255, 0, 0, 255);
+                } else {
+                    // Orange/jaune pour le feu qui s'éteint
+                    SDL_SetRenderDrawColor(m_pt_renderer, 255, 
+                                         static_cast<uint8_t>(255 * (1 - fire/127.0)), 
+                                         0, 255);
+                }
+            } else {
+                // Végétation en vert, plus foncé quand la densité est plus élevée
+                SDL_SetRenderDrawColor(m_pt_renderer, 0, 
+                                     static_cast<uint8_t>(veg), 
+                                     0, 255);
+            }
             SDL_RenderFillRect(m_pt_renderer, &rect);
         }
     }
 
-    // Affiche le résultat
     SDL_RenderPresent(m_pt_renderer);
-}
-
-std::shared_ptr<Displayer> 
-Displayer::init_instance( std::uint32_t t_width, std::uint32_t t_height )
-{
-    assert( ( "L'initialisation de l'instance ne doit etre appele qu'une seule fois !" && (unique_instance == nullptr) ) );
-    unique_instance = std::make_shared<Displayer>(t_width, t_height);
-    return unique_instance;
-}
-
-std::shared_ptr<Displayer> 
-Displayer::instance()
-{
-    assert( ( "Il faut initialiser l'instance avant tout !" && (unique_instance != nullptr) ) );
-    return unique_instance;
 }

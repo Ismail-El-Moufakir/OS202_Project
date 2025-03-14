@@ -1,38 +1,23 @@
-CXXFLAGS = -std=c++17 -Wall
-ifdef DEBUG
-CXXFLAGS += -g -O0 -fbounds-check -pedantic -D_GLIBCXX_DEBUG -fsanitize=address
-else
-CXXFLAGS += -O3 -march=native
-endif
+CXX = mpic++
+CXXFLAGS = -std=c++17 -Wall -O3 -march=native
+INCLUDES = -I/opt/homebrew/Cellar/sdl2/2.32.2/include -I/opt/homebrew/include/SDL2 -I/opt/homebrew/include -D_THREAD_SAFE
+LIBS = -L/opt/homebrew/lib -lSDL2
 
-#include Make_linux.inc
-#include Make_msys2.inc
-include Make_osx.inc
+SRCS = display.cpp model.cpp simulation.cpp
+OBJS = $(SRCS:.cpp=.o)
+DEPS = $(SRCS:.cpp=.d)
 
-ALL= simulation.exe 
+TARGET = simulation.exe
 
-default:	help
+all: $(TARGET)
 
-all: $(ALL)
+$(TARGET): $(OBJS)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LIBS)
+
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -MMD -c $< -o $@
 
 clean:
-	@rm -fr *.o *.exe *~ *.d
+	rm -f $(OBJS) $(DEPS) $(TARGET)
 
-.cpp.o:
-	$(CXX) $(CXXFLAGS) -MMD -c $< -o $@
-
-simulation.exe : display.o model.o simulation.o
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(LIB)
-
-help:
-	@echo "Available targets : "
-	@echo "    all            : compile all executables"
-	@echo "Add DEBUG=yes to compile in debug"
-	@echo "Configuration :"
-	@echo "    CXX      :    $(CXX)"
-	@echo "    CXXFLAGS :    $(CXXFLAGS)"
-
-%.html: %.md
-	pandoc -s --toc $< --css=./github-pandoc.css --metadata pagetitle="OS202 - TD1" -o $@
-
--include *.d
+-include $(DEPS)

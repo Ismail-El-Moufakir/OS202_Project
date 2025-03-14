@@ -1,215 +1,202 @@
-#include <string>
-#include <cstdlib>
-#include <cassert>
 #include <iostream>
+#include <cstdlib>
+#include <string>
 #include <thread>
 #include <chrono>
-
-#include "model.hpp"
+#include <vector>
+#include <cassert>
+#include <mpi.h>
+#include "simulation.hpp"
 #include "display.hpp"
+#include "model.hpp"
 
-using namespace std::string_literals;
-using namespace std::chrono_literals;
-
-struct ParamsType
+bool analyze_args(int nargs, char* argv[], ParamsType& params)
 {
-    double length{1.};
-    unsigned discretization{20u};
-    std::array<double,2> wind{0.,0.};
-    Model::LexicoIndices start{10u,10u};
-};
-
-void analyze_arg( int nargs, char* args[], ParamsType& params )
-{
-    if (nargs ==0) return;
-    std::string key(args[0]);
-    if (key == "-l"s)
+    for (int i = 1; i < nargs; ++i)
     {
-        if (nargs < 2)
+        std::string arg = argv[i];
+        if (arg == "-l" || arg == "--length")
         {
-            std::cerr << "Manque une valeur pour la longueur du terrain !" << std::endl;
-            exit(EXIT_FAILURE);
+            if (i + 1 < nargs)
+            {
+                params.length = std::stod(argv[++i]);
+            }
+            else
+            {
+                std::cerr << "Missing value for " << arg << std::endl;
+                return false;
+            }
         }
-        params.length = std::stoul(args[1]);
-        analyze_arg(nargs-2, &args[2], params);
-        return;
-    }
-    auto pos = key.find("--longueur=");
-    if (pos < key.size())
-    {
-        auto subkey = std::string(key,pos+11);
-        params.length = std::stoul(subkey);
-        analyze_arg(nargs-1, &args[1], params);
-        return;
-    }
-
-    if (key == "-n"s)
-    {
-        if (nargs < 2)
+        else if (arg == "-d" || arg == "--discretization")
         {
-            std::cerr << "Manque une valeur pour le nombre de cases par direction pour la discrétisation du terrain !" << std::endl;
-            exit(EXIT_FAILURE);
+            if (i + 1 < nargs)
+            {
+                params.discretization = std::stoi(argv[++i]);
+            }
+            else
+            {
+                std::cerr << "Missing value for " << arg << std::endl;
+                return false;
+            }
         }
-        params.discretization = std::stoul(args[1]);
-        analyze_arg(nargs-2, &args[2], params);
-        return;
-    }
-    pos = key.find("--number_of_cases=");
-    if (pos < key.size())
-    {
-        auto subkey = std::string(key, pos+18);
-        params.discretization = std::stoul(subkey);
-        analyze_arg(nargs-1, &args[1], params);
-        return;
-    }
-
-    if (key == "-w"s)
-    {
-        if (nargs < 2)
+        else if (arg == "-w" || arg == "--wind")
         {
-            std::cerr << "Manque une paire de valeurs pour la direction du vent !" << std::endl;
-            exit(EXIT_FAILURE);
+            if (i + 2 < nargs)
+            {
+                params.wind[0] = std::stod(argv[++i]);
+                params.wind[1] = std::stod(argv[++i]);
+            }
+            else
+            {
+                std::cerr << "Missing values for " << arg << std::endl;
+                return false;
+            }
         }
-        std::string values =std::string(args[1]);
-        params.wind[0] = std::stod(values);
-        auto pos = values.find(",");
-        if (pos == values.size())
+        else if (arg == "-s" || arg == "--start")
         {
-            std::cerr << "Doit fournir deux valeurs séparées par une virgule pour définir la vitesse" << std::endl;
-            exit(EXIT_FAILURE);
+            if (i + 2 < nargs)
+            {
+                params.start[0] = std::stod(argv[++i]);
+                params.start[1] = std::stod(argv[++i]);
+            }
+            else
+            {
+                std::cerr << "Missing values for " << arg << std::endl;
+                return false;
+            }
         }
-        auto second_value = std::string(values, pos+1);
-        params.wind[1] = std::stod(second_value);
-        analyze_arg(nargs-2, &args[2], params);
-        return;
+        else
+        {
+            std::cerr << "Unknown argument: " << arg << std::endl;
+            return false;
+        }
     }
-    pos = key.find("--wind=");
-    if (pos < key.size())
-    {
-        auto subkey = std::string(key, pos+7);
-        params.wind[0] = std::stoul(subkey);
-        auto pos = subkey.find(",");
-        if (pos == subkey.size())
-        {
-            std::cerr << "Doit fournir deux valeurs séparées par une virgule pour définir la vitesse" << std::endl;
-            exit(EXIT_FAILURE);
-        }
-        auto second_value = std::string(subkey, pos+1);
-        params.wind[1] = std::stod(second_value);
-        analyze_arg(nargs-1, &args[1], params);
-        return;
-    }
-
-    if (key == "-s"s)
-    {
-        if (nargs < 2)
-        {
-            std::cerr << "Manque une paire de valeurs pour la position du foyer initial !" << std::endl;
-            exit(EXIT_FAILURE);
-        }
-        std::string values =std::string(args[1]);
-        params.start.column = std::stod(values);
-        auto pos = values.find(",");
-        if (pos == values.size())
-        {
-            std::cerr << "Doit fournir deux valeurs séparées par une virgule pour définir la position du foyer initial" << std::endl;
-            exit(EXIT_FAILURE);
-        }
-        auto second_value = std::string(values, pos+1);
-        params.start.row = std::stod(second_value);
-        analyze_arg(nargs-2, &args[2], params);
-        return;
-    }
-    pos = key.find("--start=");
-    if (pos < key.size())
-    {
-        auto subkey = std::string(key, pos+8);
-        params.start.column = std::stoul(subkey);
-        auto pos = subkey.find(",");
-        if (pos == subkey.size())
-        {
-            std::cerr << "Doit fournir deux valeurs séparées par une virgule pour définir la vitesse" << std::endl;
-            exit(EXIT_FAILURE);
-        }
-        auto second_value = std::string(subkey, pos+1);
-        params.start.row = std::stod(second_value);
-        analyze_arg(nargs-1, &args[1], params);
-        return;
-    }
+    return true;
 }
 
-ParamsType parse_arguments( int nargs, char* args[] )
+bool check_params(const ParamsType& params)
 {
-    if (nargs == 0) return {};
-    if ( (std::string(args[0]) == "--help"s) || (std::string(args[0]) == "-h") )
-    {
-        std::cout << 
-R"RAW(Usage : simulation [option(s)]
-  Lance la simulation d'incendie en prenant en compte les [option(s)].
-  Les options sont :
-    -l, --longueur=LONGUEUR     Définit la taille LONGUEUR (réel en km) du carré représentant la carte de la végétation.
-    -n, --number_of_cases=N     Nombre n de cases par direction pour la discrétisation
-    -w, --wind=VX,VY            Définit le vecteur vitesse du vent (pas de vent par défaut).
-    -s, --start=COL,ROW         Définit les indices I,J de la case où commence l'incendie (milieu de la carte par défaut)
-)RAW";
-        exit(EXIT_SUCCESS);
-    }
-    ParamsType params;
-    analyze_arg(nargs, args, params);
-    return params;
-}
-
-bool check_params(ParamsType& params)
-{
-    bool flag = true;
     if (params.length <= 0)
     {
-        std::cerr << "[ERREUR FATALE] La longueur du terrain doit être positive et non nulle !" << std::endl;
-        flag = false;
+        std::cerr << "Length must be positive" << std::endl;
+        return false;
     }
-
     if (params.discretization <= 0)
     {
-        std::cerr << "[ERREUR FATALE] Le nombre de cellules par direction doit être positive et non nulle !" << std::endl;
-        flag = false;
+        std::cerr << "Discretization must be positive" << std::endl;
+        return false;
     }
-
-    if ( (params.start.row >= params.discretization) || (params.start.column >= params.discretization) )
+    if (params.start[0] < 0 || params.start[0] > 1 || params.start[1] < 0 || params.start[1] > 1)
     {
-        std::cerr << "[ERREUR FATALE] Mauvais indices pour la position initiale du foyer" << std::endl;
-        flag = false;
+        std::cerr << "Start position must be between 0 and 1" << std::endl;
+        return false;
     }
-    
-    return flag;
+    return true;
 }
 
-void display_params(ParamsType const& params)
+int main(int nargs, char* argv[])
 {
-    std::cout << "Parametres définis pour la simulation : \n"
-              << "\tTaille du terrain : " << params.length << std::endl 
-              << "\tNombre de cellules par direction : " << params.discretization << std::endl 
-              << "\tVecteur vitesse : [" << params.wind[0] << ", " << params.wind[1] << "]" << std::endl
-              << "\tPosition initiale du foyer (col, ligne) : " << params.start.column << ", " << params.start.row << std::endl;
-}
+    MPI_Init(&nargs, &argv);
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-int main( int nargs, char* args[] )
-{
-    auto params = parse_arguments(nargs-1, &args[1]);
-    display_params(params);
-    if (!check_params(params)) return EXIT_FAILURE;
-
-    auto displayer = Displayer::init_instance( params.discretization, params.discretization );
-    auto simu = Model( params.length, params.discretization, params.wind,
-                       params.start);
-    SDL_Event event;
-    while (simu.update())
-    {
-        if ((simu.time_step() & 31) == 0) 
-            std::cout << "Time step " << simu.time_step() << "\n===============" << std::endl;
-        displayer->update( simu.vegetal_map(), simu.fire_map() );
-        if (SDL_PollEvent(&event) && event.type == SDL_QUIT)
-            break;
-        std::this_thread::sleep_for(0.1s);
+    if (size != 2) {
+        if (rank == 0)
+            std::cerr << "Ce programme doit être exécuté avec exactement 2 processus MPI" << std::endl;
+        MPI_Finalize();
+        return EXIT_FAILURE;
     }
+
+    ParamsType params;
+    if (!analyze_args(nargs, argv, params)) {
+        MPI_Finalize();
+        return EXIT_FAILURE;
+    }
+    if (!check_params(params)) {
+        MPI_Finalize();
+        return EXIT_FAILURE;
+    }
+
+    if (rank == 0) {
+        // Processus maître : affichage
+        std::cout << "Paramètres de la simulation :" << std::endl;
+        std::cout << "  Longueur du terrain : " << params.length << std::endl;
+        std::cout << "  Discrétisation : " << params.discretization << std::endl;
+        std::cout << "  Vent : (" << params.wind[0] << ", " << params.wind[1] << ")" << std::endl;
+        std::cout << "  Position initiale du foyer : (" << params.start[0] << ", " << params.start[1] << ")" << std::endl;
+        std::cout << std::endl;
+
+        auto displayer = Displayer::createOrGetInstance(params.discretization * 5, params.discretization * 5);
+        std::vector<std::uint8_t> veg_buffer(params.discretization * params.discretization);
+        std::vector<std::uint8_t> fire_buffer(params.discretization * params.discretization);
+        bool running = true;
+
+        while (running) {
+            SDL_Event event;
+            while (SDL_PollEvent(&event)) {
+                if (event.type == SDL_QUIT) {
+                    running = false;
+                    MPI_Send(&running, 1, MPI_CXX_BOOL, 1, 3, MPI_COMM_WORLD);
+                    break;
+                }
+            }
+            if (!running) break;
+
+            MPI_Status status;
+            int flag;
+            MPI_Iprobe(1, 0, MPI_COMM_WORLD, &flag, &status);
+            if (flag) {
+                MPI_Recv(&running, 1, MPI_CXX_BOOL, 1, 0, MPI_COMM_WORLD, &status);
+                if (!running) break;
+
+                MPI_Recv(veg_buffer.data(), veg_buffer.size(), MPI_UINT8_T, 1, 1, MPI_COMM_WORLD, &status);
+                MPI_Recv(fire_buffer.data(), fire_buffer.size(), MPI_UINT8_T, 1, 2, MPI_COMM_WORLD, &status);
+                
+                displayer->update(veg_buffer, fire_buffer);
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        }
+    }
+    else {
+        // Processus de calcul
+        auto simu = Model(params.length, params.discretization, 
+                         params.wind,
+                         {static_cast<unsigned int>(params.start[0] * params.discretization), 
+                          static_cast<unsigned int>(params.start[1] * params.discretization)},
+                         10.0);  // Augmentation de la vitesse maximale du vent pour une meilleure propagation
+
+        std::chrono::time_point<std::chrono::system_clock> start, end;
+        start = std::chrono::system_clock::now();
+
+        bool running = true;
+        while (running) {
+            int flag;
+            MPI_Status status;
+            MPI_Iprobe(0, 3, MPI_COMM_WORLD, &flag, &status);
+            if (flag) {
+                MPI_Recv(&running, 1, MPI_CXX_BOOL, 0, 3, MPI_COMM_WORLD, &status);
+                break;
+            }
+
+            running = simu.update();
+            MPI_Send(&running, 1, MPI_CXX_BOOL, 0, 0, MPI_COMM_WORLD);
+            
+            if (running) {
+                auto veg_map = simu.vegetal_map();
+                auto fire_map = simu.fire_map();
+                MPI_Send(veg_map.data(), veg_map.size(), MPI_UINT8_T, 0, 1, MPI_COMM_WORLD);
+                MPI_Send(fire_map.data(), fire_map.size(), MPI_UINT8_T, 0, 2, MPI_COMM_WORLD);
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        }
+
+        end = std::chrono::system_clock::now();
+        std::chrono::duration<double> elapsed_seconds = end - start;
+        std::cout << "Temps pour la simulation : " << elapsed_seconds.count() << " secondes" << std::endl;
+    }
+
+    MPI_Finalize();
     return EXIT_SUCCESS;
-}
+} 

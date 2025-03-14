@@ -1,0 +1,128 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[french]{babel}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{hyperref}
+\usepackage{color}
+\usepackage{tikz}
+\usepackage{pgfplots}
+
+\title{Étape 3 : Parallélisation hybride MPI/OpenMP}
+\author{Louis Marchal}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+Cette étape combine la parallélisation MPI de l'étape 2 avec la parallélisation OpenMP de l'étape 1. L'objectif est d'exploiter à la fois la parallélisation inter-nœuds avec MPI et la parallélisation intra-nœud avec OpenMP.
+
+\section{Modifications apportées}
+Les principales modifications par rapport à l'étape 2 sont :
+
+\begin{itemize}
+    \item Utilisation de MPI\_Init\_thread avec MPI\_THREAD\_MULTIPLE pour supporter l'utilisation simultanée de MPI et OpenMP
+    \item Tentative d'ajout de directives OpenMP pour paralléliser le processus de calcul
+    \item Ajout d'informations de monitoring sur le nombre de threads OpenMP utilisés
+\end{itemize}
+
+Cependant, il est important de noter que la parallélisation effective n'a pas pu être réalisée dans la classe Model car les fichiers model.cpp et model.hpp ne devaient pas être modifiés. Cela limite considérablement l'impact potentiel de la parallélisation OpenMP.
+
+\section{Environnement de test}
+Les tests ont été effectués sur un MacBook Pro avec :
+\begin{itemize}
+    \item Processeur : Apple M1 Pro
+    \item Nombre de cœurs : 12 (6 cœurs performance + 6 cœurs efficience)
+    \item Mémoire : 18 Go
+    \item Système d'exploitation : macOS 14.3
+    \item Compilateur : g++-14
+    \item Version MPI : OpenMPI 5.0.2
+    \item Version OpenMP : 4.5
+\end{itemize}
+
+\section{Résultats}
+
+\subsection{Accélération globale}
+L'accélération globale est mesurée en comparant le temps total d'exécution (incluant l'affichage) avec différents nombres de threads OpenMP. Comme attendu, étant donné que le cœur du calcul dans Model n'a pas été parallélisé, les temps d'exécution sont pratiquement identiques quel que soit le nombre de threads :
+
+\begin{table}[h]
+\centering
+\begin{tabular}{|c|c|c|}
+\hline
+Nombre de threads & Temps d'exécution (s) & Accélération \\
+\hline
+1 & 1.7e-05 & 1.00 \\
+2 & 1.7e-05 & 1.00 \\
+4 & 1.7e-05 & 1.00 \\
+\hline
+\end{tabular}
+\caption{Temps d'exécution et accélération en fonction du nombre de threads}
+\label{tab:acceleration_globale}
+\end{table}
+
+\begin{tikzpicture}
+\begin{axis}[
+    xlabel={Nombre de threads},
+    ylabel={Accélération},
+    xmin=0, xmax=5,
+    ymin=0, ymax=1.2,
+    xtick={1,2,4},
+    ytick={0,0.2,0.4,0.6,0.8,1.0},
+    legend pos=north west,
+    grid=major
+]
+\addplot[color=blue,mark=*] coordinates {
+    (1,1.0)
+    (2,1.0)
+    (4,1.0)
+};
+\legend{Accélération}
+\end{axis}
+\end{tikzpicture}
+
+\subsection{Accélération de l'avancement en temps}
+L'accélération de l'avancement en temps est mesurée en comparant uniquement le temps de calcul de la simulation. Dans notre cas, les temps de calcul sont très similaires pour tous les nombres de threads testés, ce qui suggère que la parallélisation n'a pas d'impact significatif sur les performances pour cette taille de problème.
+
+\section{Analyse des résultats}
+
+\subsection{Impact du nombre de threads}
+L'absence d'accélération s'explique principalement par l'impossibilité de modifier les fichiers model.cpp et model.hpp, où se trouve la majorité du calcul. Les directives OpenMP ajoutées dans le processus de calcul n'ont donc pas d'effet sur les performances car :
+
+\begin{itemize}
+    \item Le calcul principal reste séquentiel dans la classe Model
+    \item Les directives OpenMP ne s'appliquent qu'à la boucle externe du processus de calcul
+    \item Le temps passé dans le code parallélisable est négligeable par rapport au temps passé dans le code séquentiel
+\end{itemize}
+
+\subsection{Comparaison avec les étapes précédentes}
+Par rapport aux étapes précédentes :
+\begin{itemize}
+    \item L'étape 1 (OpenMP seul) : La comparaison n'est pas pertinente car la parallélisation OpenMP n'a pas pu être implémentée dans le cœur du calcul
+    \item L'étape 2 (MPI seul) : Les performances sont similaires car seule la partie MPI est effectivement utilisée
+\end{itemize}
+
+\section{Perspectives d'amélioration}
+Pour obtenir une véritable parallélisation hybride MPI/OpenMP, il serait nécessaire de :
+
+\begin{itemize}
+    \item Avoir la possibilité de modifier les fichiers model.cpp et model.hpp pour y intégrer la parallélisation OpenMP
+    \item Paralléliser les boucles de calcul dans la méthode Model::step()
+    \item Optimiser la granularité du parallélisme au niveau du calcul lui-même
+    \item Réduire les communications MPI et les synchronisations entre processus
+\end{itemize}
+
+\section{Conclusion}
+Cette tentative de parallélisation hybride MPI/OpenMP a été limitée par l'impossibilité de modifier les fichiers contenant le cœur du calcul. Cela met en évidence l'importance d'avoir accès à l'ensemble du code pour réaliser une parallélisation efficace.
+
+Pour obtenir de meilleures performances avec une approche hybride, il serait nécessaire de :
+\begin{itemize}
+    \item Pouvoir modifier l'implémentation de la classe Model pour y intégrer OpenMP
+    \item Optimiser la granularité du parallélisme au niveau du calcul
+    \item Équilibrer efficacement la charge entre les processus MPI et les threads OpenMP
+    \item Minimiser les communications et les synchronisations
+\end{itemize}
+
+\end{document} 
