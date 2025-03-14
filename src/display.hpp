@@ -2,9 +2,10 @@
 #include <vector>
 #include <cstdint>
 #include <memory>
-#if defined(__linux__)
-#  include <SDL2/SDL.h>
+#if defined(__linux__) || defined(__APPLE__)
+#  include "SDL.h"
 #endif
+
 class Displayer
 {
 public:
@@ -25,8 +26,6 @@ public:
 private:
     static std::shared_ptr<Displayer> unique_instance;
 
-
     SDL_Renderer *m_pt_renderer{nullptr};
-    SDL_Surface  *m_pt_surface{nullptr};
     SDL_Window   *m_pt_window {nullptr};
 };

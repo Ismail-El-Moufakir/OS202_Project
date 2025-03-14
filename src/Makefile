@@ -1,13 +1,13 @@
-include Make_linux.inc
-#include Make_msys2.inc
-#include Make_osx.inc
-
 CXXFLAGS = -std=c++17 -Wall
 ifdef DEBUG
 CXXFLAGS += -g -O0 -fbounds-check -pedantic -D_GLIBCXX_DEBUG -fsanitize=address
 else
 CXXFLAGS += -O3 -march=native
 endif
+
+#include Make_linux.inc
+#include Make_msys2.inc
+include Make_osx.inc
 
 ALL= simulation.exe 
 
@@ -22,7 +22,7 @@ clean:
 	$(CXX) $(CXXFLAGS) -MMD -c $< -o $@
 
 simulation.exe : display.o model.o simulation.o
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(LIB)	
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LIB)
 
 help:
 	@echo "Available targets : "
