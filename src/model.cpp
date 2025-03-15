@@ -121,10 +121,16 @@ Model::update()
             double tirage = pseudo_random(f.first * 7919 + m_time_step, m_time_step);
             if (tirage < p2) {
                 next_front[f.first] = next_front[f.first]/2;
-                if (next_front[f.first] <= 1) next_front.erase(f.first);
+                if (next_front[f.first] <= 1) {
+                    next_front.erase(f.first);
+                    m_fire_map[f.first] = 0;  // La cellule devient noire (brûlée)
+                    m_vegetation_map[f.first] = 0;  // Plus de végétation
+                }
             }
         } else {
             next_front.erase(f.first);
+            m_fire_map[f.first] = 0;  // La cellule devient noire (brûlée)
+            m_vegetation_map[f.first] = 0;  // Plus de végétation
         }
     }
 

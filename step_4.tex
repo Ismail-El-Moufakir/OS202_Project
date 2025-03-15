@@ -1,0 +1,177 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[french]{babel}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{float}
+\usepackage{color}
+\usepackage{xcolor}
+\usepackage{geometry}
+\geometry{margin=1in}
+
+% Configuration for code listings
+\lstset{
+    language=C++,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue}\bfseries,
+    stringstyle=\color{red},
+    commentstyle=\color{green!50!black},
+    numbers=left,
+    numberstyle=\tiny,
+    stepnumber=1,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    frame=single,
+    breaklines=true,
+    breakatwhitespace=true,
+    tabsize=4
+}
+
+\title{Rapport - Étape 4 : Parallélisation MPI par découpage en tranches}
+\author{OS202 - Projet}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Introduction}
+Cette étape du projet consiste à paralléliser la simulation de feu de forêt en utilisant MPI avec un découpage en tranches. L'objectif est d'améliorer les performances en distribuant le calcul sur plusieurs processus, chacun gérant une partie du domaine de simulation.
+
+\section{Caractéristiques du Système}
+
+\subsection{Caractéristiques du CPU}
+Les informations sur le processeur ont été obtenues via la commande \texttt{lscpu} :
+\begin{verbatim}
+Model name:             Intel(R) Core(TM) i7-10750H CPU @ 2.60GHz
+    CPU family:           6
+    Model:                165
+    Thread(s) per core:   2
+    Core(s) per socket:   6
+    Socket(s):            1
+    Stepping:            2
+    BogoMIPS:           5184.01
+\end{verbatim}
+
+\begin{itemize}
+    \item Le processeur dispose de 6 cœurs physiques, avec 2 threads par cœur, soit un total de 12 threads logiques.
+    \item Fréquence de base : 2.60 GHz, avec possibilité de boost.
+\end{itemize}
+
+\subsection{Caractéristiques des Mémoires Cache}
+Les tailles des caches sont les suivantes :
+\begin{verbatim}
+Caches (sum of all):      
+  L1d:                    192 KiB (6 instances)
+  L1i:                    192 KiB (6 instances)
+  L2:                     1.5 MiB (6 instances)
+  L3:                     12 MiB (1 instance)
+\end{verbatim}
+
+\section{Implémentation}
+
+\subsection{Architecture de la solution}
+Notre implémentation repose sur les principes suivants :
+\begin{itemize}
+    \item Un processus maître (rang 0) dédié à l'affichage
+    \item \(N-1\) processus de calcul, chacun responsable d'une tranche horizontale du domaine
+    \item Communication par cellules fantômes entre les tranches adjacentes
+    \item Synchronisation des données pour l'affichage
+\end{itemize}
+
+\subsection{Découpage du domaine}
+Le domaine est découpé en tranches horizontales de taille égale :
+\begin{itemize}
+    \item Hauteur de tranche = \texttt{discretization / (nombre\_processus - 1)}
+    \item Largeur de tranche = \texttt{discretization}
+    \item Chaque tranche inclut une ligne de cellules fantômes pour la communication avec ses voisins
+\end{itemize}
+
+\subsection{Communication MPI}
+Le code implémente plusieurs types de communication :
+\begin{itemize}
+    \item Communication point-à-point pour l'échange des cellules fantômes
+    \item Communication collective pour la synchronisation des données d'affichage
+    \item Messages de contrôle pour la gestion de la simulation
+\end{itemize}
+
+\section{Analyse des performances}
+
+\subsection{Comparaison des différentes versions}
+Le tableau suivant présente une comparaison des performances entre les différentes versions développées :
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|l|c|c|c|}
+        \hline
+        \textbf{Critère} & \textbf{Séquentiel} & \textbf{MPI (2 proc.)} & \textbf{MPI Tranches} \\
+        \hline
+        Nombre de pas & 1126 & 1024 & 500 \\
+        \hline
+        Temps total & 177.385 s & 22.211 s & 60.20 s \\
+        \hline
+        Temps/pas (simulation) & 157.536 ms & 21.716 ms & 60.20 ms \\
+        \hline
+        Temps/pas (affichage) & 56.925 ms & 24.469 ms & inclus \\
+        \hline
+        Accélération & 1× & 8× & 2.95× \\
+        \hline
+    \end{tabular}
+    \caption{Comparaison des performances entre les différentes versions}
+    \label{tab:comparaison_performances}
+\end{table}
+
+\subsection{Analyse des résultats}
+Les performances observées montrent plusieurs points importants :
+\begin{itemize}
+    \item Le temps de calcul par itération est relativement stable
+    \item La communication entre processus introduit un overhead significatif
+    \item L'échange des cellules fantômes impacte les performances
+    \item La synchronisation pour l'affichage ajoute une latence supplémentaire
+\end{itemize}
+
+\subsection{Limitations actuelles}
+Plusieurs facteurs limitent les performances :
+\begin{itemize}
+    \item Surcoût de communication important entre les tranches
+    \item Déséquilibre de charge dû à la nature du problème (le feu ne se propage pas uniformément)
+    \item Synchronisation fréquente pour l'affichage
+    \item Gestion séquentielle de l'affichage par le processus maître
+\end{itemize}
+
+\section{Améliorations proposées}
+
+\subsection{Optimisation des communications}
+\begin{itemize}
+    \item Utilisation de communications non bloquantes pour le recouvrement calcul/communication
+    \item Réduction de la fréquence des synchronisations avec le processus d'affichage
+    \item Compression des données échangées entre les processus
+\end{itemize}
+
+\subsection{Équilibrage de charge}
+\begin{itemize}
+    \item Implémentation d'un découpage dynamique du domaine
+    \item Redistribution périodique des charges en fonction de l'activité du feu
+    \item Utilisation d'un découpage 2D plutôt qu'en tranches 1D
+\end{itemize}
+
+\subsection{Optimisation de l'affichage}
+\begin{itemize}
+    \item Réduction de la fréquence d'affichage
+    \item Mise en place d'un buffer double pour l'affichage
+    \item Parallélisation de la mise à jour de l'affichage
+\end{itemize}
+
+\section{Conclusion}
+L'implémentation actuelle de la parallélisation MPI par découpage en tranches montre des performances intéressantes mais inférieures à la version MPI simple avec séparation fonctionnelle. Cette différence s'explique principalement par :
+\begin{itemize}
+    \item L'overhead de communication entre les tranches
+    \item La synchronisation nécessaire pour maintenir la cohérence des données
+    \item Le déséquilibre de charge inhérent au problème
+\end{itemize}
+
+Les améliorations proposées, notamment l'utilisation de communications non bloquantes et un meilleur équilibrage de charge, pourraient permettre d'obtenir de meilleures performances. Une approche hybride MPI+OpenMP pourrait également être envisagée pour optimiser les performances sur les architectures modernes.
+
+\end{document} 
